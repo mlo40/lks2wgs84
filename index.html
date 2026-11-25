@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LKS-92 / LKS-2020 → WGS84 converter</title>
+  <meta name="description" content="Convert LKS-92 and LKS-2020 (Latvia TM) coordinates to WGS84 latitude and longitude, one point or a whole CSV file. Runs in your browser; files are not uploaded.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%239e1b32%27/%3E%3Crect y=%2713%27 width=%2732%27 height=%276%27 fill=%27white%27/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/style.css">
+  <script type="module" src="assets/app.js"></script>
+</head>
+<body>
+  <header class="page-header">
+    <h1>LKS-92 / LKS-2020 → WGS84</h1>
+    <p class="lede">Convert Latvian TM coordinates to WGS84 latitude and longitude, one point or a whole CSV file.
+      Everything runs in your browser. Files are never uploaded.</p>
+  </header>
+
+  <main>
+    <section class="card" aria-labelledby="point-title">
+      <h2 id="point-title">Single point</h2>
+      <div class="point-grid">
+        <label>X <span class="hint">northing, e.g. 311980.51</span>
+          <input id="pt-x" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="311980.51">
+        </label>
+        <label>Y <span class="hint">easting, e.g. 506893.71</span>
+          <input id="pt-y" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="506893.71">
+        </label>
+      </div>
+      <div id="pt-result" class="point-result" aria-live="polite">
+        <span class="muted">Enter X and Y to see the WGS84 position.</span>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="csv-title">
+      <h2 id="csv-title">CSV file</h2>
+      <label id="drop" class="drop" for="file-input" tabindex="0">
+        <input id="file-input" type="file" accept=".csv,.txt,text/csv,text/plain" hidden>
+        <strong>Choose a CSV file</strong> or drop it here
+        <span class="hint">The result is the same file with two columns added: wgs84_lat and wgs84_lon.</span>
+      </label>
+      <p class="small"><button type="button" id="example" class="link">Try it with an example file</button></p>
+
+      <div id="csv-error" class="alert" role="alert" hidden></div>
+
+      <div id="csv-panel" hidden>
+        <p id="file-info" class="small muted"></p>
+        <fieldset class="options">
+          <legend>Settings <span class="hint">(detected automatically, change if needed)</span></legend>
+          <label>Separator
+            <select id="opt-delimiter">
+              <option value="">auto</option>
+              <option value=";">; semicolon</option>
+              <option value=",">, comma</option>
+              <option value="&#9;">tab</option>
+              <option value="|">| pipe</option>
+            </select>
+          </label>
+          <label class="check"><input type="checkbox" id="opt-header" checked> First row is a header</label>
+          <label>X column <span class="hint">northing</span><select id="opt-x"></select></label>
+          <label>Y column <span class="hint">easting</span><select id="opt-y"></select></label>
+          <label>X/Y order
+            <select id="opt-swap">
+              <option value="auto">auto-detect</option>
+              <option value="no">as chosen</option>
+              <option value="yes">swapped</option>
+            </select>
+          </label>
+          <label>Output decimals
+            <select id="opt-decimal">
+              <option value="auto">as in the file</option>
+              <option value="dot">dot 56.95</option>
+              <option value="comma">comma 56,95</option>
+            </select>
+          </label>
+        </fieldset>
+
+        <div id="summary" class="summary" aria-live="polite"></div>
+        <div class="actions">
+          <button type="button" id="download" class="primary" disabled>Download</button>
+        </div>
+        <details id="messages-box" hidden>
+          <summary id="messages-title">Messages</summary>
+          <ul id="messages"></ul>
+        </details>
+        <div class="table-wrap">
+          <table id="preview" aria-label="Preview of the converted file"></table>
+        </div>
+        <p id="preview-note" class="small muted"></p>
+      </div>
+    </section>
+
+    <section class="card notes" aria-labelledby="notes-title">
+      <h2 id="notes-title">How it works</h2>
+      <ul>
+        <li><strong>Systems:</strong> LKS-92 / Latvia TM (EPSG:3059) and LKS-2020 / Latvia TM (EPSG:10306).
+          Both use the same Transverse Mercator projection on GRS80: central meridian 24°E, scale 0.9996,
+          false easting 500 000 m, false northing −6 000 000 m.</li>
+        <li><strong>Axes:</strong> X is northing (about 170 000–440 000 in Latvia), Y is easting (about 300 000–770 000).
+          If a file has them the other way round, the converter notices and swaps them.</li>
+        <li><strong>Accuracy:</strong> EPSG defines LKS-92 → WGS84 (transformation 1958) and LKS-2020 → WGS84 (10840)
+          as a zero shift accurate to 1 m, so one calculation serves both systems. That's fine for maps, GIS and devices,
+          not for survey work. The projection itself matches PROJ (what QGIS uses) to well under a millimetre.</li>
+        <li><strong>CSV files:</strong> separators <code>;</code> <code>,</code> tab <code>|</code>; numbers like
+          <code>311980.51</code>, <code>311980,51</code> or <code>311 980,51</code>; UTF-8 (with or without BOM) or
+          Windows-1257. The download keeps the file's separator, encoding and line endings.</li>
+        <li><strong>Privacy:</strong> the page has no server side. Your coordinates and files stay on your computer.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="page-footer small muted">
+    Static page, no tracking. Method: Krüger series per C. F. F. Karney, “Transverse Mercator with an accuracy of a few nanometers” (2011).
+  </footer>
+</body>
+</html>
