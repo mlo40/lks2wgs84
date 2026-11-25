@@ -1,8 +1,9 @@
-# LKS-92 / LKS-2020 → WGS84 (web)
+# LKS-92 / LKS-2020 ⇄ WGS84 (web)
 
-A static web page for checking and converting Latvian TM coordinates (LKS-92, EPSG:3059 and
-LKS-2020, EPSG:10306). Load a CSV file to see every point on a map with Latvia's border, get a
-list of suspicious rows, then export to WGS84 as CSV, GeoJSON or KML. Single points work too.
+A static web page for checking and converting coordinates between Latvian TM X/Y (LKS-92,
+EPSG:3059 and LKS-2020, EPSG:10306) and WGS84 latitude/longitude, in both directions. Load a CSV
+file to see every point on a map with Latvia's border, get a list of suspicious rows, then export
+as CSV, GeoJSON or KML. Single points work too.
 
 Everything runs in the browser. There is no server side and files are never uploaded.
 No build step: plain HTML, CSS and JavaScript modules, plus a bundled copy of Leaflet for the map.
@@ -29,7 +30,7 @@ python3 -m http.server 8000      # then open http://localhost:8000
 | File | Purpose |
 |---|---|
 | `index.html` | the page |
-| `assets/lks.js` | conversion, position check, CSV handling, GeoJSON/KML export (no browser APIs except TextDecoder/TextEncoder) |
+| `assets/lks.js` | conversion in both directions, position check, CSV handling, GeoJSON/KML export (no browser APIs except TextDecoder/TextEncoder) |
 | `assets/latvia.js` | Latvia's border (Natural Earth 1:10m, public domain) |
 | `assets/app.js` | page logic: single point, file loading, settings, preview, download |
 | `assets/style.css` | layout, light and dark theme |
@@ -38,15 +39,18 @@ python3 -m http.server 8000      # then open http://localhost:8000
 
 ## What it does
 
-- **Single point:** X (northing) and Y (easting) → lat/lon, with copy and map links, and a warning
-  (with a "swap X and Y?" button) when the point lands outside Latvia.
+- **Single point:** type LKS X/Y and get lat/long, or type lat/long (decimal, or degrees-minutes-seconds
+  like `56°57'05"N`) and get X/Y. Which one you typed is recognised from the numbers. Copy and map
+  links are included, and points outside Latvia get a warning (X/Y has a "swap X and Y?" button).
 - **CSV import:**
   - separator `;` `,` tab `|`, detected automatically
   - numbers like `311980.51`, `311980,51`, `311 980,51`
   - UTF-8 (with or without BOM) or Windows-1257
   - quoted fields
-  - coordinate columns found by name (`X`/`Y`, `Northing`/`Easting`, `N`/`E`, `lks92_x`,
-    `Ziemeli`/`Austrumi`, …) or chosen by hand
+  - **LKS X/Y or WGS84 lat/long**, recognised from the column names (`X`/`Y`, `Northing`/`Easting`,
+    `lks92_x`, `Ziemeli`/`Austrumi`, `lat`/`lon`, `Latitude`/`Longitude`, `Platums`/`Garums`, …)
+    and the values, or chosen by hand; columns can also be picked by hand
+  - degrees as decimals (`56.951389`, `56,951389`) or degrees-minutes-seconds
   - a whole file with X and Y swapped is detected and corrected
 - **Check:** the points appear on a map with Latvia's border as soon as a file is loaded.
   - Each point is compared with the border and coastline (Natural Earth 1:10m, accurate to a few
@@ -58,7 +62,8 @@ python3 -m http.server 8000      # then open http://localhost:8000
   - Limit: in the middle of Latvia a swapped X/Y can still land inside the country, so only the map
     shows that mistake.
 - **Export:**
-  - **CSV**: the input file with `wgs84_lat`/`wgs84_lon` added. By default in the input's own
+  - **CSV**: the input file with `wgs84_lat`/`wgs84_lon` added (for X/Y input), or `lks_x`/`lks_y`
+    (northing/easting in metres, 2 decimals, valid for LKS-92 and LKS-2020) for lat/long input. By default in the input's own
     separator, decimal style, encoding and line endings; the separator and decimals can be changed.
   - **GeoJSON** (QGIS and other GIS tools) and **KML** (Google Earth): one point per converted row
     with all its columns, plus the check result.

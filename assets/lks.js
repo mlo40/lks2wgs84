@@ -1,5 +1,5 @@
-// LKS-92 / LKS-2020 (Latvia TM) -> WGS84, plus the CSV handling used by the page.
-// Same behaviour as lks2wgs84.py. No dependencies; runs in browsers and in Node (tests).
+// LKS-92 / LKS-2020 (Latvia TM) <-> WGS84, plus the CSV handling used by the page.
+// LKS -> WGS84 behaves like lks2wgs84.py. No dependencies; runs in browsers and in Node (tests).
 //
 // EPSG:3059 (LKS-92 / Latvia TM) and EPSG:10306 (LKS-2020 / Latvia TM) share one
 // Transverse Mercator projection on GRS80: central meridian 24 E, scale 0.9996,
@@ -70,6 +70,35 @@ export function lksToWgs84(northing, easting) {
   return [lat, lon];
 }
 
+// Krueger series coefficients alpha_j, forward direction (Karney 2011, eq. 35)
+const ALPHA = [
+  N / 2 - 2 * N ** 2 / 3 + 5 * N ** 3 / 16 + 41 * N ** 4 / 180 - 127 * N ** 5 / 288 + 7891 * N ** 6 / 37800,
+  13 * N ** 2 / 48 - 3 * N ** 3 / 5 + 557 * N ** 4 / 1440 + 281 * N ** 5 / 630 - 1983433 * N ** 6 / 1935360,
+  61 * N ** 3 / 240 - 103 * N ** 4 / 140 + 15061 * N ** 5 / 26880 + 167603 * N ** 6 / 181440,
+  49561 * N ** 4 / 161280 - 179 * N ** 5 / 168 + 6601661 * N ** 6 / 7257600,
+  34729 * N ** 5 / 80640 - 3418889 * N ** 6 / 1995840,
+  212378941 * N ** 6 / 319334400,
+];
+
+/** WGS84 (lat, lon degrees) -> LKS-92 / LKS-2020 Latvia TM [X northing, Y easting] metres. */
+export function wgs84ToLks(lat, lon) {
+  const phi = lat * Math.PI / 180;
+  const lam = (lon - LON0) * Math.PI / 180;
+  const tau = Math.tan(phi);
+  const sig = Math.sinh(E * Math.atanh(E * tau / Math.hypot(1, tau)));
+  const taup = tau * Math.hypot(1, sig) - sig * Math.hypot(1, tau);
+  const xip = Math.atan2(taup, Math.cos(lam));
+  const etap = Math.asinh(Math.sin(lam) / Math.hypot(taup, Math.cos(lam)));
+  let xi = xip;
+  let eta = etap;
+  ALPHA.forEach((alpha, idx) => {
+    const j = idx + 1;
+    xi += alpha * Math.sin(2 * j * xip) * Math.cosh(2 * j * etap);
+    eta += alpha * Math.cos(2 * j * xip) * Math.sinh(2 * j * etap);
+  });
+  return [FALSE_NORTHING + K0 * RECT * xi, FALSE_EASTING + K0 * RECT * eta];
+}
+
 export function inLatvia(lat, lon, margin = MARGIN) {
   return lat >= LATVIA.south - margin && lat <= LATVIA.north + margin
     && lon >= LATVIA.west - margin && lon <= LATVIA.east + margin;
@@ -90,6 +119,31 @@ export function parseNumber(text) {
   }
   if (!/^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/.test(s)) return { value: null, comma: false };
   return { value: Number(s), comma };
+}
+
+/**
+ * Degrees: '56.951389', '56,951389', '56°57'05.0"N', '56 57 05', '24°06.8'E', 'N 56°57.08''.
+ * Returns { value, comma } (value null if not readable; S and W give negative values).
+ */
+export function parseDegrees(text) {
+  const raw = String(text ?? "").trim();
+  if (!raw) return { value: null, comma: false };
+  const plain = parseNumber(raw);
+  if (plain.value !== null && !/\s/.test(raw)) return plain;
+  let s = raw.toUpperCase().replace(/[\u2032\u2019]/g, "'").replace(/[\u2033\u201d]|''/g, '"');
+  let sign = 1;
+  const hemi = s.match(/^([NSEW])\s*|\s*([NSEW])$/);
+  if (hemi) {
+    if ("SW".includes(hemi[1] || hemi[2])) sign = -1;
+    s = s.replace(/^[NSEW]\s*|\s*[NSEW]$/, "");
+  }
+  if (s.startsWith("-")) { sign = -sign; s = s.slice(1); }
+  const m = s.match(/^(\d+(?:[.,]\d+)?)\s*(?:°|º|D|\s)\s*(?:(\d+(?:[.,]\d+)?)\s*(?:'|M|\s)?\s*)?(?:(\d+(?:[.,]\d+)?)\s*(?:"|S)?)?$/);
+  if (!m) return { value: null, comma: false };
+  const num = (x) => (x ? Number(x.replace(",", ".")) : 0);
+  const [d, min, sec] = [num(m[1]), num(m[2]), num(m[3])];
+  if (min >= 60 || sec >= 60) return { value: null, comma: false };
+  return { value: sign * (d + min / 60 + sec / 3600), comma: /\d,\d/.test(raw) };
 }
 
 export function formatNumber(value, decimals, comma) {
@@ -155,19 +209,46 @@ const NAME_NOISE = /lks|2020|92|koordinates|koordinate|koordinata|koord|coordina
 const NORTH_NAMES = new Set(["x", "n", "north", "northing", "ziemeli"]);
 const EAST_NAMES = new Set(["y", "e", "east", "easting", "austrumi"]);
 
+const LAT_NAMES = new Set(["lat", "latitude", "platums", "platuma", "fi", "phi", "wgs84lat", "lat84"]);
+const LON_NAMES = new Set(["lon", "lng", "long", "longitude", "garums", "garuma", "lambda", "wgs84lon",
+  "wgs84lng", "wgs84long", "lon84"]);
+
 export function columnKind(name) {
-  const core = String(name).toLowerCase().replace(/[^a-z0-9]/g, "").replace(NAME_NOISE, "");
+  const lower = String(name).toLowerCase().replace(/[āa]/g, "a").replace(/[ūu]/g, "u").replace(/[^a-z0-9]/g, "");
+  if (LAT_NAMES.has(lower) || LAT_NAMES.has(lower.replace(/wgs84|wgs/g, ""))) return "lat";
+  if (LON_NAMES.has(lower) || LON_NAMES.has(lower.replace(/wgs84|wgs/g, ""))) return "lon";
+  const core = lower.replace(NAME_NOISE, "");
   if (NORTH_NAMES.has(core)) return "north";
   if (EAST_NAMES.has(core)) return "east";
   return null;
 }
 
-/** Guess [northingIndex, eastingIndex] from header names; -1 when not found or ambiguous. */
-export function guessColumns(header) {
-  const north = header.map((h, i) => (columnKind(h) === "north" ? i : -1)).filter((i) => i >= 0);
-  const east = header.map((h, i) => (columnKind(h) === "east" ? i : -1)).filter((i) => i >= 0);
-  return [north.length === 1 ? north[0] : -1, east.length === 1 ? east[0] : -1];
+/** Guess [firstIndex, secondIndex] of two column kinds from header names; -1 when not found or ambiguous. */
+export function guessColumns(header, kinds = ["north", "east"]) {
+  return kinds.map((kind) => {
+    const hits = header.map((h, i) => (columnKind(h) === kind ? i : -1)).filter((i) => i >= 0);
+    return hits.length === 1 ? hits[0] : -1;
+  });
 }
+
+/** Median of the readable values in a column, and the share of non-empty cells that are readable. */
+function columnValues(data, index, parse) {
+  const values = [];
+  let filled = 0;
+  for (const row of data.slice(0, 500)) {
+    const cell = row[index];
+    if (!cell || !cell.trim()) continue;
+    filled++;
+    const v = parse(cell).value;
+    if (v !== null) values.push(v);
+  }
+  values.sort((a, b) => a - b);
+  return { share: filled ? values.length / filled : 0, median: values.length ? values[values.length >> 1] : null };
+}
+
+const isLatLike = (v) => v !== null && v >= 50 && v <= 62;   // latitudes around Latvia
+const isLonLike = (v) => v !== null && v >= 15 && v <= 35;   // longitudes around Latvia
+const isLksLike = (v) => v !== null && Math.abs(v) >= 50000 && Math.abs(v) <= 2000000;
 
 // --- text encoding ------------------------------------------------------------
 
@@ -207,7 +288,9 @@ export function encodeText(text, encoding, bom) {
 
 /**
  * Analyse a decoded CSV text. Returns everything the page needs to show and convert:
- * { delimiter, newline, rows, header, data, northIndex, eastIndex, decimalComma }
+ * { delimiter, newline, rows, header, data, width, mode, northIndex, eastIndex, latIndex, lonIndex }
+ * mode is 'lks' (X/Y in metres) or 'wgs' (latitude/longitude in degrees), detected from column
+ * names and values; the four indexes are the best guesses for each mode (-1 when unknown).
  */
 export function analyse(text, { delimiter = null, noHeader = false } = {}) {
   const delim = delimiter || detectDelimiter(text);
@@ -218,8 +301,39 @@ export function analyse(text, { delimiter = null, noHeader = false } = {}) {
   const header = noHeader ? null : rows[0];
   const data = noHeader ? rows : rows.slice(1);
   const width = Math.max(...rows.map((r) => r.length));
-  const [northIndex, eastIndex] = header ? guessColumns(header) : [-1, -1];
-  return { delimiter: delim, newline, rows, header, data, width, northIndex, eastIndex };
+  let [northIndex, eastIndex] = header ? guessColumns(header, ["north", "east"]) : [-1, -1];
+  let [latIndex, lonIndex] = header ? guessColumns(header, ["lat", "lon"]) : [-1, -1];
+
+  const stats = Array.from({ length: width }, (_, i) => ({
+    lks: columnValues(data, i, parseNumber), deg: columnValues(data, i, parseDegrees),
+  }));
+  const lksCol = (i) => i >= 0 && stats[i].lks.share >= 0.5 && isLksLike(stats[i].lks.median);
+  const latCol = (i) => i >= 0 && stats[i].deg.share >= 0.5 && isLatLike(stats[i].deg.median);
+  const lonCol = (i) => i >= 0 && stats[i].deg.share >= 0.5 && isLonLike(stats[i].deg.median);
+
+  let mode = "lks";
+  if (lksCol(northIndex) && lksCol(eastIndex)) {
+    mode = "lks";
+  } else if (latIndex >= 0 && lonIndex >= 0 && (latCol(latIndex) || lonCol(latIndex))) {
+    mode = "wgs";
+  } else if (northIndex >= 0 && eastIndex >= 0 && [northIndex, eastIndex].every((i) => latCol(i) || lonCol(i))) {
+    // columns named X/Y that hold degrees (GIS exports): decide by the values
+    mode = "wgs";
+    [latIndex, lonIndex] = latCol(eastIndex) && lonCol(northIndex) ? [eastIndex, northIndex] : [northIndex, eastIndex];
+  } else {
+    // no usable names: look at the values of every column
+    const lks = stats.map((_, i) => i).filter(lksCol);
+    const lats = stats.map((_, i) => i).filter(latCol);
+    const lons = stats.map((_, i) => i).filter((i) => lonCol(i) && !lats.includes(i));
+    if (lks.length === 2 && (northIndex < 0 || eastIndex < 0)) {
+      // X (northing, ~170 000-440 000) is the smaller one in Latvia
+      [northIndex, eastIndex] = stats[lks[0]].lks.median <= stats[lks[1]].lks.median ? lks : [lks[1], lks[0]];
+    } else if (!lks.length && lats.length === 1 && lons.length === 1) {
+      mode = "wgs";
+      [latIndex, lonIndex] = [lats[0], lons[0]];
+    }
+  }
+  return { delimiter: delim, newline, rows, header, data, width, mode, northIndex, eastIndex, latIndex, lonIndex };
 }
 
 // --- position check ------------------------------------------------------------
@@ -281,51 +395,70 @@ export function locate(lat, lon, polygons = LATVIA_BORDER_POLYGONS) {
 
 /**
  * Convert analysed data.
- * options: northIndex, eastIndex, swap ('auto'|'yes'|'no'), decimal ('auto'|'dot'|'comma'),
- *          decimals, outDelimiter (default: the input's separator)
- * Returns { outRows, stats, messages, swapped, decimalComma, results }.
- * results[i] = { line, row, lat, lon, status: 'in'|'near'|'far'|'invalid', km, note }
+ * options: mode ('lks' | 'wgs'), northIndex/eastIndex (mode lks) or latIndex/lonIndex (mode wgs),
+ *          swap ('auto'|'yes'|'no'), decimal ('auto'|'dot'|'comma'), decimals,
+ *          outDelimiter (default: the input's separator)
+ * Mode lks adds wgs84_lat / wgs84_lon; mode wgs adds lks_x / lks_y (X northing, Y easting).
+ * Returns { outRows, stats, messages, swapped, decimalComma, delimiter, mode, added, results }.
+ * results[i] = { line, row, lat, lon, x, y, status: 'in'|'near'|'far'|'invalid', km, note }
  */
 export function convert(info, {
-  northIndex, eastIndex, swap = "auto", decimal = "auto", decimals = 7, outDelimiter = null,
+  mode = "lks", northIndex = -1, eastIndex = -1, latIndex = -1, lonIndex = -1,
+  swap = "auto", decimal = "auto", decimals = null, outDelimiter = null,
 } = {}) {
-  if (northIndex < 0 || eastIndex < 0) throw new Error("Choose the X (northing) and Y (easting) columns.");
-  if (northIndex === eastIndex) throw new Error("X and Y must be different columns.");
+  const wgs = mode === "wgs";
+  const [ia, ib] = wgs ? [latIndex, lonIndex] : [northIndex, eastIndex];
+  if (ia < 0 || ib < 0) {
+    throw new Error(wgs ? "Choose the latitude and longitude columns." : "Choose the X (northing) and Y (easting) columns.");
+  }
+  if (ia === ib) throw new Error(wgs ? "Latitude and longitude must be different columns." : "X and Y must be different columns.");
   const { header, data } = info;
   const delimiter = outDelimiter || info.delimiter;
   const firstLine = header ? 2 : 1;
+  const parse = wgs ? parseDegrees : parseNumber;
   let usedComma = false;
   const parsed = data.map((row) => {
     if (!row.some((c) => c.trim())) return "blank";
-    const n = parseNumber(row[northIndex]);
-    const e = parseNumber(row[eastIndex]);
-    usedComma = usedComma || n.comma || e.comma;
-    return n.value !== null && e.value !== null ? [n.value, e.value] : null;
+    const a = parse(row[ia]);
+    const b = parse(row[ib]);
+    usedComma = usedComma || a.comma || b.comma;
+    return a.value !== null && b.value !== null ? [a.value, b.value] : null;
   });
   const valid = parsed.filter((p) => Array.isArray(p));
-  if (valid.length && valid.every(([n, e]) => Math.abs(n) <= 90 && Math.abs(e) <= 180)) {
-    throw new Error("These columns look like degrees already, not LKS coordinates in metres.");
+  if (!wgs && valid.length && valid.every(([n, e]) => Math.abs(n) <= 90 && Math.abs(e) <= 180)) {
+    throw new Error("These columns look like degrees, not LKS coordinates in metres: choose latitude/longitude as the input.");
+  }
+  if (wgs && valid.length && valid.every(([la, lo]) => Math.abs(la) > 90 || Math.abs(lo) > 180)) {
+    throw new Error("These columns look like LKS coordinates in metres, not degrees: choose LKS X/Y as the input.");
   }
 
+  // [lat, lon] of a parsed pair, in the given order or swapped
+  const toLatLon = wgs ? (p, swapPair) => (swapPair ? [p[1], p[0]] : [p[0], p[1]])
+    : (p, swapPair) => (swapPair ? lksToWgs84(p[1], p[0]) : lksToWgs84(p[0], p[1]));
   const messages = [];
   let swapped = swap === "yes";
   if (swap === "auto" && valid.length) {
-    const share = (pick) => valid.filter((p) => inLatvia(...lksToWgs84(...pick(p)))).length / valid.length;
-    if (share(([n, e]) => [n, e]) < 0.5 && share(([n, e]) => [e, n]) >= 0.9) {
+    const share = (sw) => valid.filter((p) => inLatvia(...toLatLon(p, sw))).length / valid.length;
+    if (share(false) < 0.5 && share(true) >= 0.9) {
       swapped = true;
-      const names = header ? [header[northIndex], header[eastIndex]] : [northIndex + 1, eastIndex + 1];
-      messages.push({ level: "note", text: `“${names[0]}” holds eastings and “${names[1]}” northings in this file `
-        + "(only that order puts the points in Latvia), so the two were swapped." });
+      const names = header ? [header[ia], header[ib]] : [ia + 1, ib + 1];
+      messages.push({ level: "note", text: wgs
+        ? `“${names[0]}” holds longitudes and “${names[1]}” latitudes in this file `
+          + "(only that order puts the points in Latvia), so the two were swapped."
+        : `“${names[0]}” holds eastings and “${names[1]}” northings in this file `
+          + "(only that order puts the points in Latvia), so the two were swapped." });
     }
   }
 
   // decimal comma only where it cannot clash with the separator, unless asked for explicitly
   const decimalComma = decimal === "comma" || (decimal === "auto" && usedComma && delimiter !== ",");
+  const places = decimals ?? (wgs ? 2 : 7);
+  const added = wgs ? ["lks_x", "lks_y"] : ["wgs84_lat", "wgs84_lon"];
 
   const stats = { rows: 0, converted: 0, skipped: 0, near: 0, far: 0, duplicates: 0, swappedRows: 0 };
   const results = [];
-  const seen = new Map(); // "northing|easting" -> first line
-  const outRows = header ? [[...header, "wgs84_lat", "wgs84_lon"]] : [];
+  const seen = new Map(); // coordinates -> first line
+  const outRows = header ? [[...header, ...added]] : [];
   data.forEach((row, i) => {
     const line = firstLine + i;
     const p = parsed[i];
@@ -335,11 +468,11 @@ export function convert(info, {
       stats.skipped++;
       messages.push({ level: "warn", line, text: "no valid coordinates, left empty" });
       outRows.push([...row, "", ""]);
-      results.push({ line, row, lat: null, lon: null, status: "invalid", km: null, note: "no valid coordinates" });
+      results.push({ line, row, lat: null, lon: null, x: null, y: null, status: "invalid", km: null, note: "no valid coordinates" });
       return;
     }
-    const [northing, easting] = swapped ? [p[1], p[0]] : p;
-    const [lat, lon] = lksToWgs84(northing, easting);
+    const [lat, lon] = toLatLon(p, swapped);
+    const [x, y] = wgs ? wgs84ToLks(lat, lon) : (swapped ? [p[1], p[0]] : p);
     const where = locate(lat, lon);
     const notes = [];
     if (where.status !== "in") {
@@ -348,22 +481,23 @@ export function convert(info, {
       notes.push(where.status === "near"
         ? `${km} km outside Latvia (across the border or at sea)`
         : `${km} km outside Latvia, check the input`);
-      if (locate(...lksToWgs84(easting, northing)).status === "in") {
+      if (locate(...toLatLon(p, !swapped)).status === "in") {
         stats.swappedRows++;
-        notes.push("X and Y look swapped on this line");
+        notes.push(wgs ? "latitude and longitude look swapped on this line" : "X and Y look swapped on this line");
       }
     }
-    const key = `${northing}|${easting}`;
+    const key = `${p[0]}|${p[1]}`;
     if (seen.has(key)) {
       stats.duplicates++;
       notes.push(`same coordinates as line ${seen.get(key)}`);
     } else seen.set(key, line);
     if (notes.length) messages.push({ level: where.status === "far" ? "bad" : "warn", line, text: notes.join("; ") });
     stats.converted++;
-    outRows.push([...row, formatNumber(lat, decimals, decimalComma), formatNumber(lon, decimals, decimalComma)]);
-    results.push({ line, row, lat, lon, status: where.status, km: where.km, note: notes.join("; ") });
+    const out = wgs ? [x, y] : [lat, lon];
+    outRows.push([...row, formatNumber(out[0], places, decimalComma), formatNumber(out[1], places, decimalComma)]);
+    results.push({ line, row, lat, lon, x, y, status: where.status, km: where.km, note: notes.join("; ") });
   });
-  return { outRows, stats, messages, swapped, decimalComma, delimiter, results };
+  return { outRows, stats, messages, swapped, decimalComma, delimiter, mode: wgs ? "wgs" : "lks", added, results };
 }
 
 // --- export formats ------------------------------------------------------------
@@ -397,6 +531,10 @@ export function toGeoJSON(info, result, decimals = 7) {
   const features = result.results.filter((r) => r.lat !== null).map((r) => {
     const properties = { line: r.line };
     names.forEach((name, i) => { properties[name] = r.row[i] ?? ""; });
+    if (result.mode === "wgs") {
+      properties.lks_x = Number(r.x.toFixed(2));
+      properties.lks_y = Number(r.y.toFixed(2));
+    }
     properties.check = STATUS_TEXT[r.status];
     if (r.note) properties.note = r.note;
     return {

@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   analyse, columnKind, convert, decodeBytes, detectDelimiter, encodeText, lksToWgs84, locate,
-  parseCsv, parseNumber, toGeoJSON, toKML, writeCsv,
+  parseCsv, parseDegrees, parseNumber, toGeoJSON, toKML, wgs84ToLks, writeCsv,
 } from "../assets/lks.js";
 
 const fixtures = JSON.parse(readFileSync(new URL("./fixtures.json", import.meta.url), "utf8"));
@@ -55,7 +55,7 @@ test("CSV reader/writer handle quotes and newlines", () => {
 test("column names", () => {
   for (const n of ["X", "x", "Northing", "N", "lks92_x", "X_LKS2020", "Ziemeli", "x koord"]) assert.equal(columnKind(n), "north", n);
   for (const n of ["Y", "Easting", "E", "lks92_y", "Y_LKS-2020", "Austrumi"]) assert.equal(columnKind(n), "east", n);
-  for (const n of ["id", "name", "lat", "Nr"]) assert.equal(columnKind(n), null, n);
+  for (const n of ["id", "name", "Nr", "Piezīmes"]) assert.equal(columnKind(n), null, n);
 });
 
 test("Latvian Excel style file: same separator, decimal comma, BOM kept", () => {
@@ -162,4 +162,63 @@ test("errors", () => {
   const info = analyse("id,lat,lon\n1,56.95,24.11\n");
   assert.equal(info.northIndex, -1);
   assert.throws(() => convert(info, { northIndex: -1, eastIndex: -1 }), /Choose/);
+});
+
+// --- lat/long input ------------------------------------------------------------
+
+test("WGS84 -> LKS matches PROJ (300 points) and round-trips", () => {
+  for (const p of fixtures.points) {
+    const [x, y] = wgs84ToLks(p.lat, p.lon);
+    assert.ok(Math.abs(x - p.x) < 1e-5 && Math.abs(y - p.y) < 1e-5, `${p.crs} ${p.lat} ${p.lon}: ${x} ${y}`);
+    const [lat, lon] = lksToWgs84(x, y);
+    assert.ok(metres(p.lat, p.lon, lat, lon) < 1e-6);
+  }
+});
+
+test("degree formats", () => {
+  const close = (text, want) => assert.ok(Math.abs(parseDegrees(text).value - want) < 1e-9, `${text} -> ${parseDegrees(text).value}`);
+  close("56.951389", 56.951389);
+  close("56,951389", 56.951389);
+  close(`56°57'05.0"N`, 56 + 57 / 60 + 5 / 3600);
+  close("56°57′05″", 56 + 57 / 60 + 5 / 3600);
+  close("N 56°57.0833'", 56 + 57.0833 / 60);
+  close("24 06 48", 24 + 6 / 60 + 48 / 3600);
+  close(`24°06'48"E`, 24 + 6 / 60 + 48 / 3600);
+  close(`33°51'S`, -(33 + 51 / 60));
+  assert.equal(parseDegrees("56°61'").value, null);
+  assert.equal(parseDegrees("abc").value, null);
+  assert.equal(parseDegrees("56,951389").comma, true);
+});
+
+test("lat/long columns recognised by name and by value", () => {
+  for (const n of ["lat", "Latitude", "platums", "WGS84_lat", "Platuma"]) assert.equal(columnKind(n), "lat", n);
+  for (const n of ["lon", "lng", "Long", "longitude", "garums", "wgs84_lon"]) assert.equal(columnKind(n), "lon", n);
+  assert.equal(analyse("name,lat,lon\na,56.95,24.11\n").mode, "wgs");
+  const xy = analyse("name,X,Y\na,24.11,56.95\n");            // GIS export: X = longitude
+  assert.deepEqual([xy.mode, xy.latIndex, xy.lonIndex], ["wgs", 2, 1]);
+  const unnamed = analyse("a;b;c\nriga;56,951389;24,113333\n");
+  assert.deepEqual([unnamed.mode, unnamed.latIndex, unnamed.lonIndex], ["wgs", 1, 2]);
+  const lks = analyse("a;b;c\nriga;506893,71;311980,51\n");    // no names: X is the smaller value
+  assert.deepEqual([lks.mode, lks.northIndex, lks.eastIndex], ["lks", 2, 1]);
+  assert.equal(analyse("id,X,Y\n1,311980.51,506893.71\n").mode, "lks");
+});
+
+test("lat/long file: LKS X/Y added, checks work, swapped columns fixed", () => {
+  const text = "Nosaukums;Platums;Garums\r\nRīga;56,951389;24,113333\r\nBiržai;56,2011;24,7569\r\nDMS;56°57'05.0\"N;24°06'48.0\"E\r\nnav;;\r\n";
+  const info = analyse(text);
+  assert.equal(info.mode, "wgs");
+  const r = convert(info, { mode: "wgs", latIndex: info.latIndex, lonIndex: info.lonIndex });
+  const out = writeCsv(r.outRows, r.delimiter, info.newline).split("\r\n");
+  assert.equal(out[0], "Nosaukums;Platums;Garums;lks_x;lks_y");
+  assert.equal(out[1], "Rīga;56,951389;24,113333;311980,51;506893,71");
+  assert.equal(r.stats.near, 1);
+  assert.equal(r.stats.skipped, 1);
+  assert.equal(r.results[2].status, "in");
+  const gj = JSON.parse(toGeoJSON(info, r));
+  assert.equal(gj.features[0].properties.lks_x, 311980.51);
+  const swappedFile = analyse("name;lat;lon\nriga;24,113333;56,951389\ndaug;26,4958;55,8996\n");
+  const rs = convert(swappedFile, { mode: "wgs", latIndex: 1, lonIndex: 2 });
+  assert.equal(rs.swapped, true);
+  assert.equal(rs.results[0].status, "in");
+  assert.throws(() => convert(analyse("id,X,Y\n1,311980.51,506893.71\n"), { mode: "wgs", latIndex: 1, lonIndex: 2 }), /metres/);
 });

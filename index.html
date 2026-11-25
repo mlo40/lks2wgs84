@@ -3,16 +3,16 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LKS-92 / LKS-2020 → WGS84 converter</title>
-  <meta name="description" content="Convert LKS-92 and LKS-2020 (Latvia TM) coordinates to WGS84 latitude and longitude, one point or a whole CSV file, and show them on a map. Runs in your browser; files are not uploaded.">
+  <title>LKS-92 / LKS-2020 ⇄ WGS84 converter</title>
+  <meta name="description" content="Convert between LKS-92 / LKS-2020 (Latvia TM) coordinates and WGS84 latitude and longitude, one point or a whole CSV file, and show them on a map. Runs in your browser; files are not uploaded.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%239e1b32%27/%3E%3Crect y=%2713%27 width=%2732%27 height=%276%27 fill=%27white%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="assets/style.css">
   <script type="module" src="assets/app.js"></script>
 </head>
 <body>
   <header class="page-header">
-    <h1>LKS-92 / LKS-2020 → WGS84</h1>
-    <p class="lede">Convert Latvian TM coordinates to WGS84 latitude and longitude, one point or a whole CSV file.
+    <h1>LKS-92 / LKS-2020 ⇄ WGS84</h1>
+    <p class="lede">Convert between Latvian TM coordinates (X/Y) and WGS84 latitude/longitude, one point or a whole CSV file.
       Everything runs in your browser. Files are never uploaded.</p>
   </header>
 
@@ -20,15 +20,15 @@
     <section class="card" aria-labelledby="point-title">
       <h2 id="point-title">Single point</h2>
       <div class="point-grid">
-        <label>X <span class="hint">northing, e.g. 311980.51</span>
+        <label>X or latitude <span class="hint">e.g. 311980.51 or 56.951389</span>
           <input id="pt-x" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="311980.51">
         </label>
-        <label>Y <span class="hint">easting, e.g. 506893.71</span>
+        <label>Y or longitude <span class="hint">e.g. 506893.71 or 24.113333</span>
           <input id="pt-y" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="506893.71">
         </label>
       </div>
       <div id="pt-result" class="point-result" aria-live="polite">
-        <span class="muted">Enter X and Y to see the WGS84 position.</span>
+        <span class="muted">Enter LKS X/Y or WGS84 latitude/longitude. The other system is shown here.</span>
       </div>
     </section>
 
@@ -37,9 +37,10 @@
       <label id="drop" class="drop" for="file-input" tabindex="0">
         <input id="file-input" type="file" accept=".csv,.txt,text/csv,text/plain" hidden>
         <strong>Choose a CSV file</strong> or drop it here
-        <span class="hint">See every point on a map, check for mistakes, then export as CSV, GeoJSON or KML.</span>
+        <span class="hint">LKS X/Y or WGS84 lat/long. See every point on a map, check for mistakes, then export as CSV, GeoJSON or KML.</span>
       </label>
-      <p class="small"><button type="button" id="example" class="link">Try it with an example file</button></p>
+      <p class="small">Try it with an example file: <button type="button" id="example" class="link">LKS X/Y</button>
+        or <button type="button" id="example-wgs" class="link">lat/long</button></p>
 
       <div id="csv-error" class="alert" role="alert" hidden></div>
 
@@ -57,9 +58,16 @@
             </select>
           </label>
           <label class="check"><input type="checkbox" id="opt-header" checked> First row is a header</label>
-          <label>X column <span class="hint">northing</span><select id="opt-x"></select></label>
-          <label>Y column <span class="hint">easting</span><select id="opt-y"></select></label>
-          <label>X/Y order
+          <label>Coordinates
+            <select id="opt-mode">
+              <option value="auto">auto-detect</option>
+              <option value="lks">LKS X/Y (metres)</option>
+              <option value="wgs">WGS84 lat/long (degrees)</option>
+            </select>
+          </label>
+          <label><span id="lbl-x">X column <span class="hint">northing</span></span><select id="opt-x"></select></label>
+          <label><span id="lbl-y">Y column <span class="hint">easting</span></span><select id="opt-y"></select></label>
+          <label><span id="lbl-swap">X/Y order</span>
             <select id="opt-swap">
               <option value="auto">auto-detect</option>
               <option value="no">as chosen</option>
@@ -94,7 +102,7 @@
           <legend class="visually-hidden">Export</legend>
           <label>Format
             <select id="opt-format">
-              <option value="csv">CSV: the file with wgs84_lat / wgs84_lon added</option>
+              <option value="csv" id="fmt-csv">CSV: the file with wgs84_lat / wgs84_lon added</option>
               <option value="geojson">GeoJSON: for QGIS and other GIS tools</option>
               <option value="kml">KML: for Google Earth</option>
             </select>
@@ -128,6 +136,10 @@
         <li><strong>Systems:</strong> LKS-92 / Latvia TM (EPSG:3059) and LKS-2020 / Latvia TM (EPSG:10306).
           Both use the same Transverse Mercator projection on GRS80: central meridian 24°E, scale 0.9996,
           false easting 500 000 m, false northing −6 000 000 m.</li>
+        <li><strong>Both directions:</strong> X/Y input gets <code>wgs84_lat</code>/<code>wgs84_lon</code>;
+          latitude/longitude input (decimal degrees like <code>56.951389</code> or <code>56,951389</code>, or
+          <code>56°57'05"N</code>) gets <code>lks_x</code>/<code>lks_y</code>, valid for both LKS-92 and LKS-2020.
+          Which one a file holds is detected from the column names and the values.</li>
         <li><strong>Axes:</strong> X is northing (about 170 000–440 000 in Latvia), Y is easting (about 300 000–770 000).
           If a file has them the other way round, the converter notices and swaps them.</li>
         <li><strong>Accuracy:</strong> EPSG defines LKS-92 → WGS84 (transformation 1958) and LKS-2020 → WGS84 (10840)
