@@ -1,0 +1,3 @@
+Leaflet 1.9.4 (https://leafletjs.com), BSD-2-Clause, see LICENSE.
+From the npm package leaflet@1.9.4, checksum verified against the npm registry:
+sha512-nxS1ynzJOmOlHp+iL3FyWqK89GtNL8U8rvlMOsQdTTssxZwCXh8N2NB3GDQOL+YR3XnWyZAxwQixURb+FA74PA==

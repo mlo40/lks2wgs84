@@ -7,6 +7,11 @@
 // EPSG defines both datums -> WGS84 as a zero shift with 1 m accuracy
 // (transformations 1958 and 10840), so the conversion is the inverse projection.
 
+import { LATVIA_BORDER } from "./latvia.js";
+
+/** Latvia's outline as a list of polygons (each a list of [lon, lat] rings). */
+const LATVIA_BORDER_POLYGONS = LATVIA_BORDER;
+
 const A = 6378137.0;                 // GRS80 semi-major axis
 const F = 1 / 298.257222101;         // GRS80 flattening
 const K0 = 0.9996;
@@ -217,15 +222,77 @@ export function analyse(text, { delimiter = null, noHeader = false } = {}) {
   return { delimiter: delim, newline, rows, header, data, width, northIndex, eastIndex };
 }
 
+// --- position check ------------------------------------------------------------
+
+const NEAR_KM = 1;    // within this distance of the outline counts as in Latvia (data accuracy)
+const FAR_KM = 25;    // beyond this a point is almost certainly wrong data
+
+function pointInRing(lon, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+/** Distance in km from (lat, lon) to the nearest edge of the polygons (local flat approximation). */
+function distanceToEdgesKm(lat, lon, polygons) {
+  const kx = 111.32 * Math.cos(lat * Math.PI / 180);
+  const ky = 110.57;
+  let best = Infinity;
+  for (const poly of polygons) {
+    for (const ring of poly) {
+      for (let i = 1; i < ring.length; i++) {
+        const ax = (ring[i - 1][0] - lon) * kx; const ay = (ring[i - 1][1] - lat) * ky;
+        const bx = (ring[i][0] - lon) * kx; const by = (ring[i][1] - lat) * ky;
+        const dx = bx - ax; const dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0;
+        best = Math.min(best, Math.hypot(ax + t * dx, ay + t * dy));
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * Where a point lies relative to Latvia's outline:
+ * { status: 'in' | 'near' | 'far', km } with km = distance outside the outline (0 when inside).
+ * 'in' includes points up to 1 km outside (the outline is accurate to a few hundred metres);
+ * 'near' is 1-25 km outside (across the border or at sea); 'far' is further.
+ */
+export function locate(lat, lon, polygons = LATVIA_BORDER_POLYGONS) {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return { status: "far", km: Infinity };
+  const inside = polygons.some((poly) => pointInRing(lon, lat, poly[0])
+    && !poly.slice(1).some((hole) => pointInRing(lon, lat, hole)));
+  if (inside) return { status: "in", km: 0 };
+  // cheap exit for points obviously far away
+  const b = LATVIA, m = 1;
+  if (lat < b.south - m || lat > b.north + m || lon < b.west - 2 * m || lon > b.east + 2 * m) {
+    return { status: "far", km: distanceToEdgesKm(lat, lon, polygons) };
+  }
+  const km = distanceToEdgesKm(lat, lon, polygons);
+  return { status: km <= NEAR_KM ? "in" : km <= FAR_KM ? "near" : "far", km };
+}
+
+// --- conversion ---------------------------------------------------------------
+
 /**
  * Convert analysed data.
- * options: northIndex, eastIndex, swap ('auto'|'yes'|'no'), decimal ('auto'|'dot'|'comma'), decimals
+ * options: northIndex, eastIndex, swap ('auto'|'yes'|'no'), decimal ('auto'|'dot'|'comma'),
+ *          decimals, outDelimiter (default: the input's separator)
  * Returns { outRows, stats, messages, swapped, decimalComma, results }.
+ * results[i] = { line, row, lat, lon, status: 'in'|'near'|'far'|'invalid', km, note }
  */
-export function convert(info, { northIndex, eastIndex, swap = "auto", decimal = "auto", decimals = 7 } = {}) {
+export function convert(info, {
+  northIndex, eastIndex, swap = "auto", decimal = "auto", decimals = 7, outDelimiter = null,
+} = {}) {
   if (northIndex < 0 || eastIndex < 0) throw new Error("Choose the X (northing) and Y (easting) columns.");
   if (northIndex === eastIndex) throw new Error("X and Y must be different columns.");
-  const { header, data, delimiter } = info;
+  const { header, data } = info;
+  const delimiter = outDelimiter || info.delimiter;
   const firstLine = header ? 2 : 1;
   let usedComma = false;
   const parsed = data.map((row) => {
@@ -243,9 +310,8 @@ export function convert(info, { northIndex, eastIndex, swap = "auto", decimal = 
   const messages = [];
   let swapped = swap === "yes";
   if (swap === "auto" && valid.length) {
-    const inside = valid.filter(([n, e]) => inLatvia(...lksToWgs84(n, e))).length / valid.length;
-    const insideSwapped = valid.filter(([n, e]) => inLatvia(...lksToWgs84(e, n))).length / valid.length;
-    if (inside < 0.5 && insideSwapped >= 0.9) {
+    const share = (pick) => valid.filter((p) => inLatvia(...lksToWgs84(...pick(p)))).length / valid.length;
+    if (share(([n, e]) => [n, e]) < 0.5 && share(([n, e]) => [e, n]) >= 0.9) {
       swapped = true;
       const names = header ? [header[northIndex], header[eastIndex]] : [northIndex + 1, eastIndex + 1];
       messages.push({ level: "note", text: `“${names[0]}” holds eastings and “${names[1]}” northings in this file `
@@ -253,11 +319,12 @@ export function convert(info, { northIndex, eastIndex, swap = "auto", decimal = 
     }
   }
 
+  // decimal comma only where it cannot clash with the separator, unless asked for explicitly
   const decimalComma = decimal === "comma" || (decimal === "auto" && usedComma && delimiter !== ",");
-  if (decimalComma && delimiter === ",") throw new Error("Decimal commas need a separator other than ','.");
 
-  const stats = { rows: 0, converted: 0, skipped: 0, outside: 0 };
+  const stats = { rows: 0, converted: 0, skipped: 0, near: 0, far: 0, duplicates: 0, swappedRows: 0 };
   const results = [];
+  const seen = new Map(); // "northing|easting" -> first line
   const outRows = header ? [[...header, "wgs84_lat", "wgs84_lon"]] : [];
   data.forEach((row, i) => {
     const line = firstLine + i;
@@ -268,19 +335,100 @@ export function convert(info, { northIndex, eastIndex, swap = "auto", decimal = 
       stats.skipped++;
       messages.push({ level: "warn", line, text: "no valid coordinates, left empty" });
       outRows.push([...row, "", ""]);
-      results.push({ line, row, lat: null, lon: null, ok: false });
+      results.push({ line, row, lat: null, lon: null, status: "invalid", km: null, note: "no valid coordinates" });
       return;
     }
     const [northing, easting] = swapped ? [p[1], p[0]] : p;
     const [lat, lon] = lksToWgs84(northing, easting);
-    const inside = inLatvia(lat, lon);
-    if (!inside) {
-      stats.outside++;
-      messages.push({ level: "warn", line, text: `${lat.toFixed(5)}, ${lon.toFixed(5)} is outside Latvia, check the input` });
+    const where = locate(lat, lon);
+    const notes = [];
+    if (where.status !== "in") {
+      stats[where.status]++;
+      const km = where.km < 10 ? where.km.toFixed(1) : Math.round(where.km).toString();
+      notes.push(where.status === "near"
+        ? `${km} km outside Latvia (across the border or at sea)`
+        : `${km} km outside Latvia, check the input`);
+      if (locate(...lksToWgs84(easting, northing)).status === "in") {
+        stats.swappedRows++;
+        notes.push("X and Y look swapped on this line");
+      }
     }
+    const key = `${northing}|${easting}`;
+    if (seen.has(key)) {
+      stats.duplicates++;
+      notes.push(`same coordinates as line ${seen.get(key)}`);
+    } else seen.set(key, line);
+    if (notes.length) messages.push({ level: where.status === "far" ? "bad" : "warn", line, text: notes.join("; ") });
     stats.converted++;
     outRows.push([...row, formatNumber(lat, decimals, decimalComma), formatNumber(lon, decimals, decimalComma)]);
-    results.push({ line, row, lat, lon, ok: inside });
+    results.push({ line, row, lat, lon, status: where.status, km: where.km, note: notes.join("; ") });
   });
-  return { outRows, stats, messages, swapped, decimalComma, results };
+  return { outRows, stats, messages, swapped, decimalComma, delimiter, results };
+}
+
+// --- export formats ------------------------------------------------------------
+
+/** Unique property names for the columns ("Column 3" for empty or missing headers). */
+function columnNames(info) {
+  const used = new Set();
+  return Array.from({ length: info.width }, (_, i) => {
+    let name = (info.header && info.header[i] && info.header[i].trim()) || `Column ${i + 1}`;
+    while (used.has(name)) name += "_";
+    used.add(name);
+    return name;
+  });
+}
+
+const LABEL_NAMES = /^(name|nosaukums|title|label|id|nr|numurs|kods|code)$/i;
+
+/** Index of the column used as a point's label: a name/id-like column, else the first text column. */
+function labelColumn(info, northIndex, eastIndex) {
+  const names = columnNames(info);
+  const byName = names.findIndex((n, i) => i !== northIndex && i !== eastIndex && LABEL_NAMES.test(n.trim()));
+  if (byName >= 0) return byName;
+  return names.findIndex((_, i) => i !== northIndex && i !== eastIndex);
+}
+
+const STATUS_TEXT = { in: "in Latvia", near: "near Latvia", far: "far outside Latvia" };
+
+/** GeoJSON FeatureCollection of the converted points (WGS84, [lon, lat]). */
+export function toGeoJSON(info, result, decimals = 7) {
+  const names = columnNames(info);
+  const features = result.results.filter((r) => r.lat !== null).map((r) => {
+    const properties = { line: r.line };
+    names.forEach((name, i) => { properties[name] = r.row[i] ?? ""; });
+    properties.check = STATUS_TEXT[r.status];
+    if (r.note) properties.note = r.note;
+    return {
+      type: "Feature",
+      geometry: { type: "Point", coordinates: [Number(r.lon.toFixed(decimals)), Number(r.lat.toFixed(decimals))] },
+      properties,
+    };
+  });
+  return JSON.stringify({ type: "FeatureCollection", features }, null, 1) + "\n";
+}
+
+const xml = (s) => String(s ?? "").replace(/[<>&"']/g,
+  (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[c]));
+
+/** KML document (Google Earth) with one placemark per converted point, coloured by the check. */
+export function toKML(info, result, { northIndex, eastIndex, title = "Points", decimals = 7 } = {}) {
+  const names = columnNames(info);
+  const label = labelColumn(info, northIndex, eastIndex);
+  const styles = { in: "ff467a1e", near: "ff007be0", far: "ff2b1cd6" }; // aabbggrr
+  const styleXml = Object.entries(styles).map(([k, color]) =>
+    `  <Style id="${k}"><IconStyle><color>${color}</color><scale>0.9</scale>`
+    + "<Icon><href>https://maps.google.com/mapfiles/kml/shapes/placemark_circle.png</href></Icon>"
+    + "</IconStyle></Style>").join("\n");
+  const marks = result.results.filter((r) => r.lat !== null).map((r) => {
+    const name = label >= 0 && String(r.row[label] ?? "").trim() ? r.row[label] : `Line ${r.line}`;
+    const fields = names.map((n, i) => `<Data name="${xml(n)}"><value>${xml(r.row[i])}</value></Data>`).join("");
+    const extra = `<Data name="line"><value>${r.line}</value></Data><Data name="check"><value>${STATUS_TEXT[r.status]}</value></Data>`
+      + (r.note ? `<Data name="note"><value>${xml(r.note)}</value></Data>` : "");
+    return `  <Placemark><name>${xml(name)}</name><styleUrl>#${r.status}</styleUrl>`
+      + `<ExtendedData>${fields}${extra}</ExtendedData>`
+      + `<Point><coordinates>${r.lon.toFixed(decimals)},${r.lat.toFixed(decimals)}</coordinates></Point></Placemark>`;
+  }).join("\n");
+  return '<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n<Document>\n'
+    + `  <name>${xml(title)}</name>\n${styleXml}\n${marks}\n</Document>\n</kml>\n`;
 }

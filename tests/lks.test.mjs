@@ -4,8 +4,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  analyse, columnKind, convert, decodeBytes, detectDelimiter, encodeText, lksToWgs84,
-  parseCsv, parseNumber, writeCsv,
+  analyse, columnKind, convert, decodeBytes, detectDelimiter, encodeText, lksToWgs84, locate,
+  parseCsv, parseNumber, toGeoJSON, toKML, writeCsv,
 } from "../assets/lks.js";
 
 const fixtures = JSON.parse(readFileSync(new URL("./fixtures.json", import.meta.url), "utf8"));
@@ -94,10 +94,67 @@ test("swapped X/Y detected", () => {
 
 test("bad rows reported, outside Latvia flagged", () => {
   const { result, out } = run("id,X,Y\n1,311980.51,506893.71\n2,,\n3,900000,506893\n");
-  assert.deepEqual(result.stats, { rows: 3, converted: 2, skipped: 1, outside: 1 });
+  assert.equal(result.stats.rows, 3);
+  assert.equal(result.stats.converted, 2);
+  assert.equal(result.stats.skipped, 1);
+  assert.equal(result.stats.far, 1);
   assert.equal(out.split("\n")[2], "2,,,,");
   assert.ok(result.messages.some((m) => m.line === 3));
-  assert.ok(result.messages.some((m) => m.line === 4 && /outside Latvia/.test(m.text)));
+  assert.ok(result.messages.some((m) => m.line === 4 && /km outside Latvia/.test(m.text)));
+});
+
+test("position check against Latvia's border", () => {
+  assert.equal(locate(56.951389, 24.113333).status, "in");      // Riga
+  assert.equal(locate(57.3976, 21.5605).status, "in");          // Ventspils port, at the coast
+  assert.equal(locate(57.7778, 26.0473).status, "near");        // Valga, Estonian side of the border
+  assert.equal(locate(56.2011, 24.7569).status, "near");        // Birzai, Lithuania
+  assert.equal(locate(54.6872, 25.2797).status, "far");         // Vilnius
+  assert.ok(locate(54.6872, 25.2797).km > 100);
+});
+
+test("swapped rows, duplicates and near points are listed", () => {
+  const text = "name;X;Y\nriga;311980,51;506893,71\nswapped;506893,71;311980,51\n"
+    + "birzai;228719,61;546960,26\ndup;311980,51;506893,71\n";
+  const { result } = run(text);
+  const s = result.stats;
+  assert.equal(result.swapped, false);
+  // a swap is only detectable when the swapped order lands outside Latvia
+  const ambiguous = run("name;X;Y\nventspils;364275,95;353408,13\nswapped;353408,13;364275,95\n").result;
+  assert.equal(ambiguous.stats.swappedRows, 0);
+  assert.equal(s.converted, 4);
+  assert.equal(s.swappedRows, 1);
+  assert.equal(s.near, 1);
+  assert.equal(s.duplicates, 1);
+  const byLine = Object.fromEntries(result.results.map((r) => [r.line, r]));
+  assert.equal(byLine[2].status, "in");
+  assert.match(byLine[3].note, /X and Y look swapped/);
+  assert.equal(byLine[4].status, "near");
+  assert.match(byLine[5].note, /same coordinates as line 2/);
+});
+
+test("output separator and decimals can be chosen", () => {
+  const text = "name;X;Y\nriga;311980,51;506893,71\n";
+  const info = analyse(text);
+  const asTab = convert(info, { northIndex: 1, eastIndex: 2, outDelimiter: "\t" });
+  assert.equal(writeCsv(asTab.outRows, asTab.delimiter, "\n").split("\n")[1], "riga\t311980,51\t506893,71\t56,9513890\t24,1133330");
+  const asComma = convert(info, { northIndex: 1, eastIndex: 2, outDelimiter: "," });
+  // decimal commas would clash with ',' so lat/lon switch to dots; text fields with commas get quoted
+  assert.equal(writeCsv(asComma.outRows, asComma.delimiter, "\n").split("\n")[1], 'riga,"311980,51","506893,71",56.9513890,24.1133330');
+});
+
+test("GeoJSON and KML export", () => {
+  const text = "Nosaukums;X;Y\nA & <B>;311980,51;506893,71\nempty;;\n";
+  const info = analyse(text);
+  const result = convert(info, { northIndex: 1, eastIndex: 2 });
+  const gj = JSON.parse(toGeoJSON(info, result));
+  assert.equal(gj.features.length, 1);
+  assert.deepEqual(gj.features[0].geometry.coordinates, [24.113333, 56.951389]);
+  assert.equal(gj.features[0].properties.Nosaukums, "A & <B>");
+  assert.equal(gj.features[0].properties.check, "in Latvia");
+  const kml = toKML(info, result, { northIndex: 1, eastIndex: 2, title: "t.csv" });
+  assert.match(kml, /<name>A &amp; &lt;B&gt;<\/name>/);
+  assert.match(kml, /<coordinates>24\.1133330,56\.9513890<\/coordinates>/);
+  assert.equal((kml.match(/<Placemark>/g) || []).length, 1);
 });
 
 test("errors", () => {

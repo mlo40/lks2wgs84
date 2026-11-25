@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>LKS-92 / LKS-2020 → WGS84 converter</title>
-  <meta name="description" content="Convert LKS-92 and LKS-2020 (Latvia TM) coordinates to WGS84 latitude and longitude, one point or a whole CSV file. Runs in your browser; files are not uploaded.">
+  <meta name="description" content="Convert LKS-92 and LKS-2020 (Latvia TM) coordinates to WGS84 latitude and longitude, one point or a whole CSV file, and show them on a map. Runs in your browser; files are not uploaded.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%239e1b32%27/%3E%3Crect y=%2713%27 width=%2732%27 height=%276%27 fill=%27white%27/%3E%3C/svg%3E">
   <link rel="stylesheet" href="assets/style.css">
   <script type="module" src="assets/app.js"></script>
@@ -37,7 +37,7 @@
       <label id="drop" class="drop" for="file-input" tabindex="0">
         <input id="file-input" type="file" accept=".csv,.txt,text/csv,text/plain" hidden>
         <strong>Choose a CSV file</strong> or drop it here
-        <span class="hint">The result is the same file with two columns added: wgs84_lat and wgs84_lon.</span>
+        <span class="hint">See every point on a map, check for mistakes, then export as CSV, GeoJSON or KML.</span>
       </label>
       <p class="small"><button type="button" id="example" class="link">Try it with an example file</button></p>
 
@@ -46,7 +46,7 @@
       <div id="csv-panel" hidden>
         <p id="file-info" class="small muted"></p>
         <fieldset class="options">
-          <legend>Settings <span class="hint">(detected automatically, change if needed)</span></legend>
+          <legend>Input <span class="hint">(detected automatically, change if needed)</span></legend>
           <label>Separator
             <select id="opt-delimiter">
               <option value="">auto</option>
@@ -66,7 +66,48 @@
               <option value="yes">swapped</option>
             </select>
           </label>
-          <label>Output decimals
+        </fieldset>
+
+        <h3 class="step">Check</h3>
+        <div id="summary" class="summary" aria-live="polite"></div>
+        <div class="map-box">
+          <div id="map"></div>
+          <div class="map-foot">
+            <p id="map-legend" class="small"></p>
+            <button type="button" id="map-toggle" class="link small" aria-controls="map" aria-expanded="true">Hide map</button>
+          </div>
+        </div>
+        <details id="messages-box" hidden>
+          <summary id="messages-title">Problems</summary>
+          <ul id="messages"></ul>
+        </details>
+        <div class="table-head">
+          <label class="check"><input type="checkbox" id="only-problems"> Only rows with problems</label>
+          <span id="preview-note" class="small muted"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="preview" aria-label="Preview of the converted file"></table>
+        </div>
+
+        <h3 class="step">Export</h3>
+        <fieldset class="options export">
+          <legend class="visually-hidden">Export</legend>
+          <label>Format
+            <select id="opt-format">
+              <option value="csv">CSV: the file with wgs84_lat / wgs84_lon added</option>
+              <option value="geojson">GeoJSON: for QGIS and other GIS tools</option>
+              <option value="kml">KML: for Google Earth</option>
+            </select>
+          </label>
+          <label class="csv-only">Separator
+            <select id="opt-outsep">
+              <option value="">as in the file</option>
+              <option value=";">; semicolon</option>
+              <option value=",">, comma</option>
+              <option value="&#9;">tab</option>
+            </select>
+          </label>
+          <label class="csv-only">Decimals
             <select id="opt-decimal">
               <option value="auto">as in the file</option>
               <option value="dot">dot 56.95</option>
@@ -74,19 +115,10 @@
             </select>
           </label>
         </fieldset>
-
-        <div id="summary" class="summary" aria-live="polite"></div>
         <div class="actions">
           <button type="button" id="download" class="primary" disabled>Download</button>
+          <span id="download-name" class="small muted"></span>
         </div>
-        <details id="messages-box" hidden>
-          <summary id="messages-title">Messages</summary>
-          <ul id="messages"></ul>
-        </details>
-        <div class="table-wrap">
-          <table id="preview" aria-label="Preview of the converted file"></table>
-        </div>
-        <p id="preview-note" class="small muted"></p>
       </div>
     </section>
 
@@ -104,7 +136,13 @@
         <li><strong>CSV files:</strong> separators <code>;</code> <code>,</code> tab <code>|</code>; numbers like
           <code>311980.51</code>, <code>311980,51</code> or <code>311 980,51</code>; UTF-8 (with or without BOM) or
           Windows-1257. The download keeps the file's separator, encoding and line endings.</li>
-        <li><strong>Privacy:</strong> the page has no server side. Your coordinates and files stay on your computer.</li>
+        <li><strong>Check:</strong> every point is compared with Latvia's border and coastline (Natural Earth 1:10m,
+          accurate to a few hundred metres): <span class="dot in"></span>in Latvia (or within 1 km),
+          <span class="dot near"></span>1–25 km outside (across the border or at sea),
+          <span class="dot far"></span>further away, which usually means wrong data. Rows where X and Y look swapped
+          and duplicate coordinates are listed too.</li>
+        <li><strong>Privacy:</strong> the page has no server side. Your coordinates and files stay on your computer.
+          The map's background tiles come from OpenStreetMap, which sees which map area is shown.</li>
       </ul>
     </section>
   </main>
