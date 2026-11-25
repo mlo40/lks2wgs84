@@ -156,7 +156,7 @@ function popupFor(result) {
   return box;
 }
 
-async function drawPoints() {
+async function drawPoints({ fit = true } = {}) {
   const legend = $("map-legend");
   if (mapState.hidden || !state.result) return;
   let map;
@@ -171,6 +171,12 @@ async function drawPoints() {
   mapState.layer.clearLayers();
   mapState.markers.clear();
   const points = state.result.results.filter((r) => r.lat !== null);
+  // line through the points in file order, under the points: a wrong point shows up as a spike
+  if ($("map-line").checked && points.length > 1) {
+    L.polyline(points.map((r) => [r.lat, r.lon]), {
+      color: "#2563eb", weight: 2, opacity: 0.7, interactive: false,
+    }).addTo(mapState.layer);
+  }
   // draw problems last so they sit on top
   const order = { in: 0, near: 1, far: 2 };
   for (const r of [...points].sort((a, b) => order[a.status] - order[b.status])) {
@@ -187,7 +193,8 @@ async function drawPoints() {
   } else {
     legend.append("Click a point for its row, or a row or problem below to find its point.");
     const bounds = mapState.layer.getBounds();
-    if (points.length === 1) map.setView(bounds.getCenter(), 15);
+    if (!fit) { /* keep the current view */ }
+    else if (points.length === 1) map.setView(bounds.getCenter(), 15);
     else map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });
   }
   $("preview").classList.toggle("map-on", points.length > 0);
@@ -510,3 +517,4 @@ $("opt-format").addEventListener("change", updateExport);
 $("only-problems").addEventListener("change", () => { if (state.result) renderPreview(state.result); });
 $("download").addEventListener("click", download);
 $("map-toggle").addEventListener("click", toggleMap);
+$("map-line").addEventListener("change", () => drawPoints({ fit: false }));

@@ -82,7 +82,10 @@
           <div id="map"></div>
           <div class="map-foot">
             <p id="map-legend" class="small"></p>
-            <button type="button" id="map-toggle" class="link small" aria-controls="map" aria-expanded="true">Hide map</button>
+            <span class="map-controls">
+              <label class="check small"><input type="checkbox" id="map-line" checked> Connect points</label>
+              <button type="button" id="map-toggle" class="link small" aria-controls="map" aria-expanded="true">Hide map</button>
+            </span>
           </div>
         </div>
         <details id="messages-box" hidden>

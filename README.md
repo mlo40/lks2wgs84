@@ -58,6 +58,8 @@ python3 -m http.server 8000      # then open http://localhost:8000
     border or at sea) or **far** (further, usually a typo or mixed-up columns).
   - Also listed: rows without coordinates, rows where X and Y look swapped, and duplicate coordinates.
   - Clicking a problem or a table row jumps to the point; clicking a point shows its row.
+  - A line connects the points in file order (switch off with "Connect points"), so a wrong point
+    shows up as a spike in the line.
   - "Only rows with problems" filters the preview.
   - Limit: in the middle of Latvia a swapped X/Y can still land inside the country, so only the map
     shows that mistake.
