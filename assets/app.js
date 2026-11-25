@@ -60,8 +60,10 @@ function renderPoint() {
   const pt = readPoint();
   if (!pt) {
     out.innerHTML = '<span class="muted">Enter LKS X/Y or WGS84 latitude/longitude. The other system is shown here.</span>';
+    showSinglePoint(null);
     return;
   }
+  showSinglePoint(pt);
   const { lat, lon, x, y } = pt;
   const latlon = `${lat.toFixed(7)}, ${lon.toFixed(7)}`;
   const xy = `X ${x.toFixed(2)}  Y ${y.toFixed(2)}`;
@@ -99,7 +101,8 @@ $("pt-y").addEventListener("input", renderPoint);
 
 // --- map -------------------------------------------------------------------------
 
-const mapState = { map: null, layer: null, markers: new Map(), hidden: false, loading: null };
+const mapState = { map: null, layer: null, pointLayer: null, markers: new Map(), loading: null };
+const isPhone = () => window.matchMedia("(max-width: 700px)").matches;
 
 function loadLeaflet() {
   if (window.L) return Promise.resolve(window.L);
@@ -132,9 +135,35 @@ async function ensureMap() {
       interactive: false,
     }).addTo(mapState.map);
     mapState.layer = L.featureGroup().addTo(mapState.map);
-    mapState.map.setView([56.88, 24.6], 7);
+    mapState.pointLayer = L.featureGroup().addTo(mapState.map);
+    mapState.map.fitBounds([[55.67, 20.97], [58.08, 28.24]], fitOptions());
   }
   return mapState.map;
+}
+
+/** Padding that keeps fitted points clear of the floating windows. */
+function fitOptions(maxZoom = 16) {
+  if (isPhone()) return { padding: [20, 20], maxZoom };
+  const wide = window.innerWidth > 1150;
+  const table = $("win-table");
+  const bottom = wide && !table.hidden ? table.getBoundingClientRect().height + 50 : 24;
+  return { paddingTopLeft: [376, 24], paddingBottomRight: [wide && !$("win-check").hidden ? 376 : 24, bottom], maxZoom };
+}
+
+/** Show the single point (blue) on the map; null removes it. */
+async function showSinglePoint(pt) {
+  const map = await ensureMap().catch(() => null);
+  if (!map) return;
+  mapState.pointLayer.clearLayers();
+  if (!pt) return;
+  const box = el("div");
+  box.append(el("div", "popup-line", "Single point"));
+  box.append(el("div", "popup-coords", `X ${pt.x.toFixed(2)}  Y ${pt.y.toFixed(2)}`));
+  box.append(el("div", "popup-coords", `${pt.lat.toFixed(7)}, ${pt.lon.toFixed(7)}`));
+  window.L.circleMarker([pt.lat, pt.lon], {
+    radius: 8, color: "#ffffff", weight: 2, fillColor: "#2563eb", fillOpacity: 1,
+  }).bindPopup(box).addTo(mapState.pointLayer);
+  map.fitBounds(window.L.latLng(pt.lat, pt.lon).toBounds(1500), fitOptions());
 }
 
 function popupFor(result) {
@@ -158,7 +187,7 @@ function popupFor(result) {
 
 async function drawPoints({ fit = true } = {}) {
   const legend = $("map-legend");
-  if (mapState.hidden || !state.result) return;
+  if (!state.result) { await ensureMap().catch(() => null); return; }
   let map;
   try {
     map = await ensureMap();
@@ -191,35 +220,30 @@ async function drawPoints({ fit = true } = {}) {
   if (!points.length) {
     legend.textContent = "No converted points to show.";
   } else {
-    legend.append("Click a point for its row, or a row or problem below to find its point.");
+    legend.append("Click a point for its row, or a row or problem to find its point.");
     const bounds = mapState.layer.getBounds();
     if (!fit) { /* keep the current view */ }
-    else if (points.length === 1) map.setView(bounds.getCenter(), 15);
-    else map.fitBounds(bounds, { padding: [24, 24], maxZoom: 16 });
+    else if (points.length === 1) map.fitBounds(bounds.getCenter().toBounds(1500), fitOptions());
+    else map.fitBounds(bounds, fitOptions());
   }
   $("preview").classList.toggle("map-on", points.length > 0);
 }
 
 function focusPoint(line) {
-  const marker = !mapState.hidden && mapState.markers.get(line);
+  const marker = mapState.markers.get(line);
   if (!marker) return;
-  mapState.map.setView(marker.getLatLng(), Math.max(mapState.map.getZoom(), 15));
+  mapState.map.fitBounds(marker.getLatLng().toBounds(1200), fitOptions(Math.max(mapState.map.getZoom(), 15)));
   marker.openPopup();
-  $("map").scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-
-function toggleMap() {
-  mapState.hidden = !mapState.hidden;
-  $("map").hidden = mapState.hidden;
-  $("map-legend").hidden = mapState.hidden;
-  $("map-toggle").textContent = mapState.hidden ? "Show map" : "Hide map";
-  $("map-toggle").setAttribute("aria-expanded", String(!mapState.hidden));
-  if (!mapState.hidden) drawPoints();
+  if (isPhone()) window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 // --- CSV -----------------------------------------------------------------------
 
 const state = { name: null, decoded: null, info: null, result: null };
+
+function setLoaded(loaded) {
+  for (const node of document.querySelectorAll(".needs-file")) node.hidden = !loaded;
+}
 
 function showError(message) {
   $("csv-error").textContent = message;
@@ -289,7 +313,7 @@ function reanalyse() {
   $("file-info").textContent = `${state.name}: ${info.data.length} data rows, ${sep}-separated, ${encoding}, `
     + `${info.newline === "\r\n" ? "Windows" : "Unix"} line endings, `
     + `${info.mode === "wgs" ? "latitude/longitude" : "LKS X/Y"} coordinates.`;
-  $("csv-panel").hidden = false;
+  setLoaded(true);
   reconvert();
 }
 
@@ -419,7 +443,7 @@ function renderPreview(result) {
 function fail(err) {
   state.info = null;
   state.result = null;
-  $("csv-panel").hidden = true;
+  setLoaded(false);
   showError(err.message || String(err));
 }
 
@@ -488,18 +512,61 @@ $("file-input").addEventListener("change", (e) => {
   if (file) loadFile(file).catch(fail);
   e.target.value = "";
 });
-const drop = $("drop");
-drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
-drop.addEventListener("dragleave", () => drop.classList.remove("over"));
-drop.addEventListener("drop", (e) => {
+$("drop").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file-input").click(); }
+});
+// a file can be dropped anywhere on the page
+let dragDepth = 0;
+const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
+window.addEventListener("dragenter", (e) => { if (hasFiles(e)) { dragDepth++; $("drop-veil").hidden = false; } });
+window.addEventListener("dragleave", (e) => { if (hasFiles(e) && --dragDepth <= 0) { dragDepth = 0; $("drop-veil").hidden = true; } });
+window.addEventListener("dragover", (e) => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener("drop", (e) => {
+  if (!hasFiles(e)) return;
   e.preventDefault();
-  drop.classList.remove("over");
+  dragDepth = 0;
+  $("drop-veil").hidden = true;
   const file = e.dataTransfer.files[0];
   if (file) loadFile(file).catch(fail);
 });
-drop.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file-input").click(); }
-});
+
+// windows: collapse with the arrow, drag by the title bar, double-click the title bar to dock again
+for (const win of document.querySelectorAll(".win")) {
+  const head = win.querySelector(".win-head");
+  win.querySelector(".win-min").addEventListener("click", () => win.classList.toggle("collapsed"));
+  head.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".win-min")) return;
+    win.classList.remove("floating");
+    win.style.cssText = "";
+  });
+  head.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest(".win-min") || isPhone()) return;
+    const rect = win.getBoundingClientRect();
+    const dx = e.clientX - rect.left;
+    const dy = e.clientY - rect.top;
+    let moved = false;
+    const move = (ev) => {
+      if (!moved && Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 4) return;
+      if (!moved) {
+        moved = true;
+        win.style.width = `${rect.width}px`;
+        win.classList.add("floating", "dragging");
+      }
+      const left = Math.min(Math.max(0, ev.clientX - dx), window.innerWidth - 60);
+      const top = Math.min(Math.max(0, ev.clientY - dy), window.innerHeight - 36);
+      win.style.left = `${left}px`;
+      win.style.top = `${top}px`;
+    };
+    const up = () => {
+      win.classList.remove("dragging");
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  });
+}
+
 const EXAMPLE_WGS = "\ufeffNosaukums;Platums;Garums\r\n"
   + "Brīvības piemineklis;56,951389;24,113333\r\n"
   + "Daugavpils cietoksnis;55°53'58.6\"N;26°29'44.9\"E\r\n"
@@ -516,5 +583,5 @@ for (const id of ["opt-x", "opt-y", "opt-swap", "opt-decimal", "opt-outsep"]) $(
 $("opt-format").addEventListener("change", updateExport);
 $("only-problems").addEventListener("change", () => { if (state.result) renderPreview(state.result); });
 $("download").addEventListener("click", download);
-$("map-toggle").addEventListener("click", toggleMap);
+drawPoints(); // the map is there from the start
 $("map-line").addEventListener("change", () => drawPoints({ fit: false }));

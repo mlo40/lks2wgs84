@@ -10,100 +10,75 @@
   <script type="module" src="assets/app.js"></script>
 </head>
 <body>
-  <header class="page-header">
-    <h1>LKS-92 / LKS-2020 ⇄ WGS84</h1>
-    <p class="lede">Convert between Latvian TM coordinates (X/Y) and WGS84 latitude/longitude, one point or a whole CSV file.
-      Everything runs in your browser. Files are never uploaded.</p>
-  </header>
-
-  <main>
-    <section class="card" aria-labelledby="point-title">
-      <h2 id="point-title">Single point</h2>
-      <div class="point-grid">
-        <label>X or latitude <span class="hint">e.g. 311980.51 or 56.951389</span>
-          <input id="pt-x" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="311980.51">
+  <div id="map" aria-label="Map"></div>
+  <div class="ui">
+    <div class="dock dock-left">
+      <header class="brand"><h1>LKS-92 / LKS-2020 ⇄ WGS84</h1></header>
+      <section class="win" id="win-file" aria-labelledby="win-file-t">
+        <header class="win-head"><h2 id="win-file-t">File</h2><button type="button" class="win-min" aria-label="Collapse or expand" title="Collapse / expand">▾</button></header>
+        <div class="win-body">
+        <label id="drop" class="drop" for="file-input" tabindex="0">
+          <input id="file-input" type="file" accept=".csv,.txt,text/csv,text/plain" hidden>
+          <strong>Choose a CSV file</strong> or drop it anywhere
+          <span class="hint">LKS X/Y or WGS84 lat/long</span>
         </label>
-        <label>Y or longitude <span class="hint">e.g. 506893.71 or 24.113333</span>
-          <input id="pt-y" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="506893.71">
-        </label>
-      </div>
-      <div id="pt-result" class="point-result" aria-live="polite">
-        <span class="muted">Enter LKS X/Y or WGS84 latitude/longitude. The other system is shown here.</span>
-      </div>
-    </section>
-
-    <section class="card" aria-labelledby="csv-title">
-      <h2 id="csv-title">CSV file</h2>
-      <label id="drop" class="drop" for="file-input" tabindex="0">
-        <input id="file-input" type="file" accept=".csv,.txt,text/csv,text/plain" hidden>
-        <strong>Choose a CSV file</strong> or drop it here
-        <span class="hint">LKS X/Y or WGS84 lat/long. See every point on a map, check for mistakes, then export as CSV, GeoJSON or KML.</span>
-      </label>
-      <p class="small">Try it with an example file: <button type="button" id="example" class="link">LKS X/Y</button>
-        or <button type="button" id="example-wgs" class="link">lat/long</button></p>
-
-      <div id="csv-error" class="alert" role="alert" hidden></div>
-
-      <div id="csv-panel" hidden>
-        <p id="file-info" class="small muted"></p>
-        <fieldset class="options">
-          <legend>Input <span class="hint">(detected automatically, change if needed)</span></legend>
-          <label>Separator
-            <select id="opt-delimiter">
-              <option value="">auto</option>
-              <option value=";">; semicolon</option>
-              <option value=",">, comma</option>
-              <option value="&#9;">tab</option>
-              <option value="|">| pipe</option>
-            </select>
-          </label>
-          <label class="check"><input type="checkbox" id="opt-header" checked> First row is a header</label>
-          <label>Coordinates
-            <select id="opt-mode">
-              <option value="auto">auto-detect</option>
-              <option value="lks">LKS X/Y (metres)</option>
-              <option value="wgs">WGS84 lat/long (degrees)</option>
-            </select>
-          </label>
-          <label><span id="lbl-x">X column <span class="hint">northing</span></span><select id="opt-x"></select></label>
-          <label><span id="lbl-y">Y column <span class="hint">easting</span></span><select id="opt-y"></select></label>
-          <label><span id="lbl-swap">X/Y order</span>
-            <select id="opt-swap">
-              <option value="auto">auto-detect</option>
-              <option value="no">as chosen</option>
-              <option value="yes">swapped</option>
-            </select>
-          </label>
-        </fieldset>
-
-        <h3 class="step">Check</h3>
-        <div id="summary" class="summary" aria-live="polite"></div>
-        <div class="map-box">
-          <div id="map"></div>
-          <div class="map-foot">
-            <p id="map-legend" class="small"></p>
-            <span class="map-controls">
-              <label class="check small"><input type="checkbox" id="map-line" checked> Connect points</label>
-              <button type="button" id="map-toggle" class="link small" aria-controls="map" aria-expanded="true">Hide map</button>
-            </span>
+        <p class="small">Example: <button type="button" id="example" class="link">LKS X/Y</button>
+          or <button type="button" id="example-wgs" class="link">lat/long</button></p>
+        <div id="csv-error" class="alert" role="alert" hidden></div>
+        <div id="csv-panel" class="needs-file" hidden>
+          <p id="file-info" class="small muted"></p>
+          <div class="options">
+            <label>Separator
+              <select id="opt-delimiter">
+                <option value="">auto</option>
+                <option value=";">; semicolon</option>
+                <option value=",">, comma</option>
+                <option value="&#9;">tab</option>
+                <option value="|">| pipe</option>
+              </select>
+            </label>
+            <label>Coordinates
+              <select id="opt-mode">
+                <option value="auto">auto-detect</option>
+                <option value="lks">LKS X/Y (metres)</option>
+                <option value="wgs">WGS84 lat/long</option>
+              </select>
+            </label>
+            <label><span id="lbl-x">X column <span class="hint">northing</span></span><select id="opt-x"></select></label>
+            <label><span id="lbl-y">Y column <span class="hint">easting</span></span><select id="opt-y"></select></label>
+            <label><span id="lbl-swap">X/Y order</span>
+              <select id="opt-swap">
+                <option value="auto">auto-detect</option>
+                <option value="no">as chosen</option>
+                <option value="yes">swapped</option>
+              </select>
+            </label>
+            <label class="check"><input type="checkbox" id="opt-header" checked> First row is a header</label>
           </div>
         </div>
-        <details id="messages-box" hidden>
-          <summary id="messages-title">Problems</summary>
-          <ul id="messages"></ul>
-        </details>
-        <div class="table-head">
-          <label class="check"><input type="checkbox" id="only-problems"> Only rows with problems</label>
-          <span id="preview-note" class="small muted"></span>
         </div>
-        <div class="table-wrap">
-          <table id="preview" aria-label="Preview of the converted file"></table>
+      </section>
+      <section class="win" id="win-point" aria-labelledby="win-point-t">
+        <header class="win-head"><h2 id="win-point-t">Single point</h2><button type="button" class="win-min" aria-label="Collapse or expand" title="Collapse / expand">▾</button></header>
+        <div class="win-body">
+        <div class="options">
+          <label>X or latitude
+            <input id="pt-x" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="311980.51">
+          </label>
+          <label>Y or longitude
+            <input id="pt-y" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="506893.71">
+          </label>
         </div>
-
-        <h3 class="step">Export</h3>
-        <fieldset class="options export">
-          <legend class="visually-hidden">Export</legend>
-          <label>Format
+        <div id="pt-result" class="point-result" aria-live="polite">
+          <span class="muted">Enter LKS X/Y or WGS84 latitude/longitude. The other system is shown here.</span>
+        </div>
+        </div>
+      </section>
+      <section class="win needs-file" id="win-export" aria-labelledby="win-export-t" hidden>
+        <header class="win-head"><h2 id="win-export-t">Export</h2><button type="button" class="win-min" aria-label="Collapse or expand" title="Collapse / expand">▾</button></header>
+        <div class="win-body">
+        <div class="options">
+          <label class="wide">Format
             <select id="opt-format">
               <option value="csv" id="fmt-csv">CSV: the file with wgs84_lat / wgs84_lon added</option>
               <option value="geojson">GeoJSON: for QGIS and other GIS tools</option>
@@ -125,16 +100,17 @@
               <option value="comma">comma 56,95</option>
             </select>
           </label>
-        </fieldset>
+        </div>
         <div class="actions">
           <button type="button" id="download" class="primary" disabled>Download</button>
           <span id="download-name" class="small muted"></span>
         </div>
-      </div>
-    </section>
-
-    <section class="card notes" aria-labelledby="notes-title">
-      <h2 id="notes-title">How it works</h2>
+        </div>
+      </section>
+      <section class="win notes collapsed" id="win-about" aria-labelledby="win-about-t">
+        <header class="win-head"><h2 id="win-about-t">How it works</h2><button type="button" class="win-min" aria-label="Collapse or expand" title="Collapse / expand">▾</button></header>
+        <div class="win-body">
+        <p class="small">Everything runs in your browser. Files are never uploaded. Drag a window by its title bar; double-click the title bar to put it back.</p>
       <ul>
         <li><strong>Systems:</strong> LKS-92 / Latvia TM (EPSG:3059) and LKS-2020 / Latvia TM (EPSG:10306).
           Both use the same Transverse Mercator projection on GRS80: central meridian 24°E, scale 0.9996,
@@ -157,13 +133,41 @@
           <span class="dot far"></span>further away, which usually means wrong data. Rows where X and Y look swapped
           and duplicate coordinates are listed too.</li>
         <li><strong>Privacy:</strong> the page has no server side. Your coordinates and files stay on your computer.
-          The map's background tiles come from OpenStreetMap, which sees which map area is shown.</li>
+          The map's background tiles are loaded from OpenStreetMap when the page opens, so it sees which map area is shown, never your file.</li>
       </ul>
-    </section>
-  </main>
-
-  <footer class="page-footer small muted">
-    Static page, no tracking. Method: Krüger series per C. F. F. Karney, “Transverse Mercator with an accuracy of a few nanometers” (2011).
-  </footer>
+        <p class="small muted">Method: Krüger series per C. F. F. Karney, “Transverse Mercator with an accuracy of a few nanometers” (2011).</p>
+        </div>
+      </section>
+    </div>
+    <div class="dock dock-right">
+      <section class="win needs-file" id="win-check" aria-labelledby="win-check-t" hidden>
+        <header class="win-head"><h2 id="win-check-t">Check</h2><button type="button" class="win-min" aria-label="Collapse or expand" title="Collapse / expand">▾</button></header>
+        <div class="win-body">
+        <div id="summary" class="summary" aria-live="polite"></div>
+        <label class="check small"><input type="checkbox" id="map-line" checked> Connect points in row order</label>
+        <p id="map-legend" class="small muted"></p>
+        <details id="messages-box" hidden>
+          <summary id="messages-title">Problems</summary>
+          <ul id="messages"></ul>
+        </details>
+        </div>
+      </section>
+    </div>
+    <div class="dock dock-bottom">
+      <section class="win needs-file" id="win-table" aria-labelledby="win-table-t" hidden>
+        <header class="win-head"><h2 id="win-table-t">Rows</h2><button type="button" class="win-min" aria-label="Collapse or expand" title="Collapse / expand">▾</button></header>
+        <div class="win-body">
+        <div class="table-head">
+          <label class="check"><input type="checkbox" id="only-problems"> Only rows with problems</label>
+          <span id="preview-note" class="small muted"></span>
+        </div>
+        <div class="table-wrap">
+          <table id="preview" aria-label="Preview of the converted file"></table>
+        </div>
+        </div>
+      </section>
+    </div>
+  </div>
+  <div id="drop-veil" hidden>Drop the CSV file to load it</div>
 </body>
 </html>

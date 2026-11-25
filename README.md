@@ -34,10 +34,16 @@ python3 -m http.server 8000      # then open http://localhost:8000
 | `assets/latvia.js` | Latvia's border (Natural Earth 1:10m, public domain) |
 | `assets/app.js` | page logic: single point, file loading, settings, preview, download |
 | `assets/style.css` | layout, light and dark theme |
-| `assets/vendor/leaflet/` | Leaflet 1.9.4 (BSD-2-Clause), loaded once a file is opened |
+| `assets/vendor/leaflet/` | Leaflet 1.9.4 (BSD-2-Clause), loaded when the page opens |
 | `tests/` | tests for `lks.js` with PROJ reference points (`node --test tests/lks.test.mjs`) |
 
 ## What it does
+
+The map fills the screen. Floating windows hold everything else: **File** (load a CSV and its input
+settings), **Single point**, **Check** (summary and problems), **Rows** (the table), **Export** and
+**How it works**. Windows collapse with the arrow in their title bar, can be dragged by the title bar,
+and go back to their place on a double-click of the title bar. A file can be dropped anywhere on the page.
+On phones the map stays on top and the windows scroll below it.
 
 - **Single point:** type LKS X/Y and get lat/long, or type lat/long (decimal, or degrees-minutes-seconds
   like `56°57'05"N`) and get X/Y. Which one you typed is recognised from the numbers. Copy and map
@@ -73,7 +79,7 @@ python3 -m http.server 8000      # then open http://localhost:8000
 With default settings the CSV export is byte-identical to the command-line tool `lks2wgs84.py`.
 
 **Privacy:** nothing leaves the browser. The only outside requests are the map's background tiles
-from OpenStreetMap, made once a file is loaded
+from OpenStreetMap, made when the page opens
 ([tile usage policy](https://operations.osmfoundation.org/policies/tiles/)); they show which map
 area is viewed, not the file.
 
