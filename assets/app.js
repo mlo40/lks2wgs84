@@ -1,5 +1,5 @@
 import {
-  analyse, convert, decodeBytes, encodeText, inLatvia, lksToWgs84, locate, parseDegrees, parseNumber,
+  analyse, convert, decodeBytes, encodeText, formatDistance, inLatvia, lksToWgs84, locate, parseDegrees, parseNumber,
   toGeoJSON, toKML, wgs84ToLks, writeCsv,
 } from "./lks.js";
 import { LATVIA_BORDER } from "./latvia.js";
@@ -79,8 +79,7 @@ function renderPoint() {
   out.append(link(osm, "OpenStreetMap"), link(gmaps, "Google Maps"));
   const where = locate(lat, lon);
   if (where.status !== "in") {
-    const km = where.km < 10 ? where.km.toFixed(1) : Math.round(where.km);
-    const hint = el("span", "warn", `${km} km outside Latvia. `);
+    const hint = el("span", "warn", `${formatDistance(where.km)} outside Latvia. `);
     if (pt.kind === "lks" && locate(...lksToWgs84(y, x)).status === "in") {
       const swap = el("button", "link", "Swap X and Y?");
       swap.type = "button";
@@ -128,7 +127,7 @@ async function ensureMap() {
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-        + ' | border: <a href="https://www.naturalearthdata.com/">Natural Earth</a>',
+        + ' | border: Geoportal of Latvia via <a href="https://www.geoboundaries.org/">geoBoundaries</a> (CC BY 4.0)',
     }).addTo(mapState.map);
     L.polygon(LATVIA_BORDER.map((poly) => poly.map((ring) => ring.map(([lon, lat]) => [lat, lon]))), {
       color: "#9e1b32", weight: 2, dashArray: "6 4", fillColor: "#9e1b32", fillOpacity: 0.04,

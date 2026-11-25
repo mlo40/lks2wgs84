@@ -31,7 +31,7 @@ python3 -m http.server 8000      # then open http://localhost:8000
 |---|---|
 | `index.html` | the page |
 | `assets/lks.js` | conversion in both directions, position check, CSV handling, GeoJSON/KML export (no browser APIs except TextDecoder/TextEncoder) |
-| `assets/latvia.js` | Latvia's border (Natural Earth 1:10m, public domain) |
+| `assets/latvia.js` | Latvia's border and coastline (Geoportal of Latvia via geoBoundaries, CC BY 4.0), simplified to 10 m |
 | `assets/app.js` | page logic: single point, file loading, settings, preview, download |
 | `assets/style.css` | layout, light and dark theme |
 | `assets/vendor/leaflet/` | Leaflet 1.9.4 (BSD-2-Clause), loaded when the page opens |
@@ -59,8 +59,8 @@ On phones the map stays on top and the windows scroll below it.
   - degrees as decimals (`56.951389`, `56,951389`) or degrees-minutes-seconds
   - a whole file with X and Y swapped is detected and corrected
 - **Check:** the points appear on a map with Latvia's border as soon as a file is loaded.
-  - Each point is compared with the border and coastline (Natural Earth 1:10m, accurate to a few
-    hundred metres): **in Latvia** (or within 1 km), **near** (1–25 km outside, e.g. across the
+  - Each point is compared with the border and coastline (official 2021 boundary from the
+    Geoportal of Latvia, kept to within 10 m): **in Latvia** (or within 50 m), **near** (up to 25 km outside, e.g. across the
     border or at sea) or **far** (further, usually a typo or mixed-up columns).
   - Also listed: rows without coordinates, rows where X and Y look swapped, and duplicate coordinates.
   - Clicking a problem or a table row jumps to the point; clicking a point shows its row.

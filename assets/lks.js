@@ -338,7 +338,7 @@ export function analyse(text, { delimiter = null, noHeader = false } = {}) {
 
 // --- position check ------------------------------------------------------------
 
-const NEAR_KM = 1;    // within this distance of the outline counts as in Latvia (data accuracy)
+const NEAR_KM = 0.05; // within this distance of the outline counts as in Latvia (data accuracy)
 const FAR_KM = 25;    // beyond this a point is almost certainly wrong data
 
 function pointInRing(lon, lat, ring) {
@@ -374,8 +374,8 @@ function distanceToEdgesKm(lat, lon, polygons) {
 /**
  * Where a point lies relative to Latvia's outline:
  * { status: 'in' | 'near' | 'far', km } with km = distance outside the outline (0 when inside).
- * 'in' includes points up to 1 km outside (the outline is accurate to a few hundred metres);
- * 'near' is 1-25 km outside (across the border or at sea); 'far' is further.
+ * 'in' includes points up to 50 m outside (the outline is accurate to about 10 m);
+ * 'near' is 50 m - 25 km outside (across the border or at sea); 'far' is further.
  */
 export function locate(lat, lon, polygons = LATVIA_BORDER_POLYGONS) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return { status: "far", km: Infinity };
@@ -389,6 +389,12 @@ export function locate(lat, lon, polygons = LATVIA_BORDER_POLYGONS) {
   }
   const km = distanceToEdgesKm(lat, lon, polygons);
   return { status: km <= NEAR_KM ? "in" : km <= FAR_KM ? "near" : "far", km };
+}
+
+/** '135 m', '1.4 km', '377 km' */
+export function formatDistance(km) {
+  if (km < 1) return `${Math.round(km * 1000)} m`;
+  return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
 }
 
 // --- conversion ---------------------------------------------------------------
@@ -477,10 +483,10 @@ export function convert(info, {
     const notes = [];
     if (where.status !== "in") {
       stats[where.status]++;
-      const km = where.km < 10 ? where.km.toFixed(1) : Math.round(where.km).toString();
+      const dist = formatDistance(where.km);
       notes.push(where.status === "near"
-        ? `${km} km outside Latvia (across the border or at sea)`
-        : `${km} km outside Latvia, check the input`);
+        ? `${dist} outside Latvia (across the border or at sea)`
+        : `${dist} outside Latvia, check the input`);
       if (locate(...toLatLon(p, !swapped)).status === "in") {
         stats.swappedRows++;
         notes.push(wgs ? "latitude and longitude look swapped on this line" : "X and Y look swapped on this line");
